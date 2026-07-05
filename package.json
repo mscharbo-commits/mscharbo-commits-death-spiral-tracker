@@ -9,7 +9,8 @@
     "lint": "next lint",
     "crawler:daily": "ts-node -P tsconfig.crawler.json crawler/jobs/daily-edgar-scan.ts",
     "crawler:8k": "ts-node -P tsconfig.crawler.json crawler/jobs/8k-conversion-scan.ts",
-    "crawler:both": "npm run crawler:daily && npm run crawler:8k"
+    "crawler:both": "npm run crawler:daily && npm run crawler:8k",
+    "test:edgar": "ts-node -P tsconfig.crawler.json crawler/jobs/test-edgar-filings.ts"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.27.3",
