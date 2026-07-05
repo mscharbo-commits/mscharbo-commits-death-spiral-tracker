@@ -1,49 +1,51 @@
-import axios from 'axios';
-import * as cheerio from 'cheerio';
+import puppeteer from 'puppeteer';
 
 export async function scrapeEdgarSearch(keyword: string): Promise<any[]> {
+  let browser;
   try {
-    console.log(`  Scraping SEC EDGAR for "${keyword}"...`);
-
-    // Hit the actual SEC EDGAR search page
-    const response = await axios.get('https://www.sec.gov/edgar/search/', {
-      params: {
-        q: keyword,
-        count: 100
-      },
-      headers: {
-        'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36'
-      },
-      timeout: 15000
+    console.log(`  Launching browser for "${keyword}"...`);
+    browser = await puppeteer.launch({ headless: true });
+    const page = await browser.newPage();
+    
+    // Go to SEC EDGAR search
+    await page.goto(`https://www.sec.gov/edgar/search/?q=${encodeURIComponent(keyword)}&count=100`, {
+      waitUntil: 'networkidle2',
+      timeout: 30000
     });
 
-    const $ = cheerio.load(response.data);
-    const filings: any[] = [];
+    // Wait for results table to load
+    await page.waitForSelector('table tbody tr', { timeout: 10000 }).catch(() => {});
 
-    // Parse the search results table
-    $('table tbody tr').each((i, row) => {
-      const cells = $(row).find('td');
-      if (cells.length < 4) return;
+    // Extract data from rendered page
+    const filings = await page.evaluate(() => {
+      const rows: any[] = [];
+      document.querySelectorAll('table tbody tr').forEach((row) => {
+        const cells = row.querySelectorAll('td');
+        if (cells.length < 4) return;
 
-      const companyName = $(cells[0]).text().trim();
-      const formType = $(cells[1]).text().trim();
-      const filedDate = $(cells[2]).text().trim();
-      const link = $(cells[0]).find('a').attr('href');
+        const form = cells[0]?.textContent?.trim() || '';
+        const company = cells[1]?.textContent?.trim() || '';
+        const filed = cells[2]?.textContent?.trim() || '';
+        const link = cells[0]?.querySelector('a')?.href || '';
 
-      if (companyName && link) {
-        filings.push({
-          conm: companyName,
-          form: formType,
-          filedAt: filedDate,
-          link: link.startsWith('http') ? link : `https://www.sec.gov${link}`
-        });
-      }
+        if (company && form) {
+          rows.push({
+            form,
+            conm: company,
+            filedAt: filed,
+            link
+          });
+        }
+      });
+      return rows;
     });
 
     console.log(`  ✓ Found ${filings.length} results`);
     return filings;
   } catch (error) {
-    console.error(`Scrape error for "${keyword}":`, error);
+    console.error(`Browser error for "${keyword}":`, error);
     return [];
+  } finally {
+    if (browser) await browser.close();
   }
 }
