@@ -3,31 +3,17 @@ import { extractSignals, extractToxicConvertible } from '../lib/signals';
 import { createClient } from '../lib/supabase';
 import axios from 'axios';
 
-// Companies that ACTUALLY use toxic convertibles:
-// - Early-stage biotech/pharma
-// - Growth companies in trouble
-// - SPACs
-// - Distressed companies
-// - Micro-caps with cash problems
-const TICKERS = [
-  // Early-stage biotech/pharma
-  'CRNC', 'CRIS', 'CRSR', 'CBPO', 'CRSP',
-  // Struggling growth tech
-  'COIN', 'UPST', 'HOOD', 'CLSK', 'MARA',
-  // Growth/renewal energy (early stage)
-  'PLUG', 'FCEL', 'BLNK', 'LCID', 'RIVN',
-  // Fintech/payments (struggling)
-  'SOFI', 'SQ', 'PYPL', 'DASH',
-  // Cannabis/CBD
-  'SNDL', 'TLRY', 'GRWG',
-  // AR/VR/Metaverse (struggling)
-  'MVIS', 'BITF', 'RIOT',
-  // Restaurants/travel (distressed)
-  'HRTX', 'CMTL', 'SGHT',
-  // Retail/e-commerce (struggling)
-  'W', 'WISH', 'FEYE',
-  // Telecom/cable (distressed)
-  'SHENX', 'VMEO'
+// Tickers ChatGPT identified with known toxic converts
+const TICKERS = ['ABVC', 'ONMD', 'RCAT', 'SOAR', 'HUBC', 'MULN', 'FFIE', 'NVOS', 'GFAI', 'CYN'];
+
+// Exact phrases from SEC filings
+const TOXIC_PHRASES = [
+  'no minimum conversion price',
+  'variable conversion price',
+  'lowest trading days',
+  'floating-price financing',
+  'multiple restructuring',
+  'dilutive convertibles'
 ];
 
 async function getFilingText(url: string): Promise<string | null> {
@@ -39,13 +25,18 @@ async function getFilingText(url: string): Promise<string | null> {
   }
 }
 
+function hasToxicPhrase(text: string): boolean {
+  const lowerText = text.toLowerCase();
+  return TOXIC_PHRASES.some(phrase => lowerText.includes(phrase));
+}
+
 export async function runDailyEdgarScan(initialScan: boolean = false) {
   const supabase = createClient();
   let totalFound = 0;
-  let totalSignals = 0;
+  let toxicMentions = 0;
   let totalToxic = 0;
   
-  console.log(`\n[${new Date().toISOString()}] 🚀 SEARCHING FOR TOXIC CONVERTS IN DISTRESSED COMPANIES\n`);
+  console.log(`\n[${new Date().toISOString()}] 🚀 SCREENING KNOWN TOXIC TICKERS\n`);
 
   for (const ticker of TICKERS) {
     console.log(`📊 ${ticker}`);
@@ -56,10 +47,15 @@ export async function runDailyEdgarScan(initialScan: boolean = false) {
         if (!filing.filingUrl && !filing.url) continue;
         
         totalFound++;
-
         const filingUrl = filing.filingUrl || filing.url || '';
         const filingText = await getFilingText(filingUrl);
         if (!filingText) continue;
+
+        // Stage 1: Filter for toxic phrases
+        if (!hasToxicPhrase(filingText)) continue;
+
+        toxicMentions++;
+        console.log(`  🔍 Found toxic phrase in ${filing.form}`);
 
         // Get or create company
         let company: any = null;
@@ -73,12 +69,11 @@ export async function runDailyEdgarScan(initialScan: boolean = false) {
         }
         if (!company) continue;
 
-        // Check for toxic convertible (this is the money signal)
+        // Stage 2: Deep analysis with Claude
         const convertible = await extractToxicConvertible(filingText);
         if (convertible) {
           totalToxic++;
-          console.log(`  ⚠️  FOUND: ${convertible.dealName} (Score: ${convertible.toxicityScore}/10)`);
-          console.log(`     Red flags: ${convertible.redFlags.join(', ')}`);
+          console.log(`  ⚠️  TOXIC: ${convertible.dealName} (${convertible.toxicityScore}/10)`);
           
           const noteResult = await supabase.from('death_spiral_notes').insert([{
             company_id: company.id,
@@ -102,37 +97,18 @@ export async function runDailyEdgarScan(initialScan: boolean = false) {
             }
           }
         }
-
-        // Also extract general signals for context
-        const signals = await extractSignals(filingText, ticker);
-        if (signals.length > 0) {
-          totalSignals += signals.length;
-          console.log(`  📈 ${signals.length} signals`);
-          
-          for (const signal of signals) {
-            await supabase.from('investment_signals').insert([{
-              company_id: company.id,
-              signal_type: signal.signalType,
-              strength: signal.strength,
-              evidence: signal.evidence,
-              sentiment: signal.sentiment,
-              filing_url: filingUrl,
-              filing_date: filing.filingDate || new Date().toISOString().split('T')[0],
-            }]);
-          }
-        }
       }
 
-      await new Promise((resolve) => setTimeout(resolve, 500));
+      await new Promise((resolve) => setTimeout(resolve, 2000));
     } catch (error) {
-      console.error(`Error for ${ticker}:`, error);
+      console.error(`Error:`, error);
     }
   }
 
   console.log(`\n[${new Date().toISOString()}] ✅ COMPLETE`);
-  console.log(`📈 Filings analyzed: ${totalFound}`);
-  console.log(`📊 Investment signals: ${totalSignals}`);
-  console.log(`⚠️  TOXIC CONVERTIBLES FOUND: ${totalToxic}\n`);
+  console.log(`📊 Filings scanned: ${totalFound}`);
+  console.log(`🔍 Toxic phrases found: ${toxicMentions}`);
+  console.log(`⚠️  TOXIC CONVERTIBLES: ${totalToxic}\n`);
 }
 
 if (require.main === module) {
