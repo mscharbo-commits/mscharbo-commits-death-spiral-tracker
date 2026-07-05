@@ -1,4 +1,5 @@
 import puppeteer from 'puppeteer';
+import fs from 'fs';
 
 export async function scrapeEdgarSearch(keyword: string): Promise<any[]> {
   let browser;
@@ -7,43 +8,62 @@ export async function scrapeEdgarSearch(keyword: string): Promise<any[]> {
     browser = await puppeteer.launch({ headless: true });
     const page = await browser.newPage();
     
-    // Go to SEC EDGAR search
-    await page.goto(`https://www.sec.gov/edgar/search/?q=${encodeURIComponent(keyword)}&count=100`, {
-      waitUntil: 'networkidle2',
-      timeout: 30000
-    });
+    const url = `https://www.sec.gov/edgar/search/?q=${encodeURIComponent(keyword)}&count=100`;
+    console.log(`  URL: ${url}`);
+    
+    await page.goto(url, { waitUntil: 'networkidle2', timeout: 30000 });
 
-    // Wait for results table to load
-    await page.waitForSelector('table tbody tr', { timeout: 10000 }).catch(() => {});
+    // Debug: Save HTML to file
+    const html = await page.content();
+    fs.writeFileSync(`/tmp/edgar_${keyword.replace(/\s+/g, '_')}.html`, html);
+    console.log(`  Saved HTML to /tmp/edgar_${keyword.replace(/\s+/g, '_')}.html`);
 
-    // Extract data from rendered page
-    const filings = await page.evaluate(() => {
-      const rows: any[] = [];
-      document.querySelectorAll('table tbody tr').forEach((row) => {
-        const cells = row.querySelectorAll('td');
-        if (cells.length < 4) return;
+    // Debug: Check what's in the page
+    const pageText = await page.evaluate(() => document.body.innerText);
+    console.log(`  Page text length: ${pageText.length}`);
+    if (pageText.includes('convertible') || pageText.includes('results')) {
+      console.log(`  ✓ Page contains data`);
+    } else {
+      console.log(`  ✗ Page might be empty or blocked`);
+    }
 
-        const form = cells[0]?.textContent?.trim() || '';
-        const company = cells[1]?.textContent?.trim() || '';
-        const filed = cells[2]?.textContent?.trim() || '';
-        const link = cells[0]?.querySelector('a')?.href || '';
+    // Try different selectors
+    const selectors = [
+      'table tbody tr',
+      '.results tr',
+      '[data-test="filing-row"]',
+      '.filing-row',
+      'tr[data-filing]'
+    ];
 
-        if (company && form) {
-          rows.push({
-            form,
-            conm: company,
-            filedAt: filed,
-            link
+    let filings: any[] = [];
+    
+    for (const selector of selectors) {
+      try {
+        await page.waitForSelector(selector, { timeout: 5000 }).catch(() => {});
+        filings = await page.evaluate((sel) => {
+          const rows: any[] = [];
+          document.querySelectorAll(sel).forEach((row: any) => {
+            rows.push({
+              html: row.innerHTML,
+              text: row.innerText
+            });
           });
+          return rows;
+        }, selector);
+        
+        if (filings.length > 0) {
+          console.log(`  ✓ Found ${filings.length} rows with selector: ${selector}`);
+          break;
         }
-      });
-      return rows;
-    });
+      } catch (e) {
+        // Try next selector
+      }
+    }
 
-    console.log(`  ✓ Found ${filings.length} results`);
-    return filings;
+    return filings.length > 0 ? filings : [];
   } catch (error) {
-    console.error(`Browser error for "${keyword}":`, error);
+    console.error(`Browser error:`, error);
     return [];
   } finally {
     if (browser) await browser.close();

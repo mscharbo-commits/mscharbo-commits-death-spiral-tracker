@@ -1,20 +1,18 @@
-import { scrapeEdgarSearch } from '../lib/edgar';
+import { getCompanyFilings } from '../lib/polygon';
 import { extractSignals, extractToxicConvertible } from '../lib/signals';
 import { createClient } from '../lib/supabase';
 import axios from 'axios';
 
-const KEYWORDS = [
-  'convertible note',
-  'convertible loan',
-  'insider buying',
-  'share repurchase',
-  'going concern',
-  'material weakness',
+// Use YOUR PulseStock tickers that are already filtered
+const TICKERS = [
+  'NVDA', 'TSLA', 'MSFT', 'AAPL', 'AMZN',
+  'GOOGL', 'META', 'NFLX', 'AMD', 'INTC',
+  'PLTR', 'UPST', 'COIN', 'HOOD', 'ROKU'
 ];
 
-async function getFilingText(filingUrl: string): Promise<string | null> {
+async function getFilingText(url: string): Promise<string | null> {
   try {
-    const response = await axios.get(filingUrl, { timeout: 15000 });
+    const response = await axios.get(url, { timeout: 15000 });
     return response.data;
   } catch (error) {
     return null;
@@ -27,36 +25,40 @@ export async function runDailyEdgarScan(initialScan: boolean = false) {
   let totalSignals = 0;
   let totalToxic = 0;
   
-  console.log(`\n[${new Date().toISOString()}] 🚀 SCRAPING SEC EDGAR\n`);
+  console.log(`\n[${new Date().toISOString()}] 🚀 SCANNING POLYGON FOR SIGNALS\n`);
 
-  for (const keyword of KEYWORDS) {
-    console.log(`🔍 "${keyword}"`);
+  for (const ticker of TICKERS) {
+    console.log(`📊 ${ticker}`);
     try {
-      const filings = await scrapeEdgarSearch(keyword);
-
+      const filings = await getCompanyFilings(ticker);
+      
       for (const filing of filings) {
         totalFound++;
 
-        const filingText = await getFilingText(filing.link);
+        // Polygon gives us URLs to filing text
+        const filingUrl = filing.filing_url || filing.url || '';
+        if (!filingUrl) continue;
+
+        const filingText = await getFilingText(filingUrl);
         if (!filingText) continue;
 
         // Get or create company
         let company: any = null;
-        const existingCompany = await supabase.from('death_spiral_companies').select('id').eq('name', filing.conm).single();
+        const existingCompany = await supabase.from('death_spiral_companies').select('id').eq('name', ticker).single();
         
         if (existingCompany.data) {
           company = existingCompany.data;
         } else {
-          const newCompany = await supabase.from('death_spiral_companies').insert([{ name: filing.conm, cik: '' }]).select('id').single();
+          const newCompany = await supabase.from('death_spiral_companies').insert([{ name: ticker, cik: '' }]).select('id').single();
           if (newCompany.data) company = newCompany.data;
         }
         if (!company) continue;
 
         // Extract signals
-        const signals = await extractSignals(filingText, filing.conm);
+        const signals = await extractSignals(filingText, ticker);
         if (signals.length > 0) {
           totalSignals += signals.length;
-          console.log(`  📊 ${filing.conm} [${filing.form}]: ${signals.length} signals`);
+          console.log(`  📈 ${signals.length} signals`);
           
           for (const signal of signals) {
             await supabase.from('investment_signals').insert([{
@@ -65,8 +67,8 @@ export async function runDailyEdgarScan(initialScan: boolean = false) {
               strength: signal.strength,
               evidence: signal.evidence,
               sentiment: signal.sentiment,
-              filing_url: filing.link,
-              filing_date: filing.filedAt,
+              filing_url: filingUrl,
+              filing_date: new Date().toISOString().split('T')[0],
             }]);
           }
         }
@@ -75,7 +77,7 @@ export async function runDailyEdgarScan(initialScan: boolean = false) {
         const convertible = await extractToxicConvertible(filingText);
         if (convertible) {
           totalToxic++;
-          console.log(`  ⚠️  TOXIC: ${convertible.dealName} (${convertible.toxicityScore}/10)`);
+          console.log(`  ⚠️  ${convertible.dealName}`);
           
           const noteResult = await supabase.from('death_spiral_notes').insert([{
             company_id: company.id,
@@ -85,8 +87,8 @@ export async function runDailyEdgarScan(initialScan: boolean = false) {
             red_flags: convertible.redFlags,
             green_flags: convertible.greenFlags,
             is_toxic: convertible.toxicityScore >= 6,
-            filing_url: filing.link,
-            filing_date: filing.filedAt,
+            filing_url: filingUrl,
+            filing_date: new Date().toISOString().split('T')[0],
           }]).select('id').single();
 
           if (noteResult.data) {
@@ -101,7 +103,7 @@ export async function runDailyEdgarScan(initialScan: boolean = false) {
         }
       }
 
-      await new Promise((resolve) => setTimeout(resolve, 2000));
+      await new Promise((resolve) => setTimeout(resolve, 1000));
     } catch (error) {
       console.error(`Error:`, error);
     }
