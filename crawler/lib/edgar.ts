@@ -1,25 +1,28 @@
 import axios from 'axios';
 
-export async function searchEdgar(keyword: string, daysBack: number = 1): Promise<any[]> {
+export async function searchEdgar(keyword: string, daysBack: number = 1095): Promise<any[]> {
   try {
-    const date = new Date();
-    date.setDate(date.getDate() - daysBack);
-    const dateFrom = date.toISOString().split('T')[0];
+    const endDate = new Date();
+    const startDate = new Date();
+    startDate.setDate(startDate.getDate() - daysBack);
+    
+    const endDateStr = endDate.toISOString().split('T')[0];
+    const startDateStr = startDate.toISOString().split('T')[0];
 
-    console.log(`  Searching for "${keyword}" since ${dateFrom}...`);
+    console.log(`  Searching for "${keyword}" from ${startDateStr} to ${endDateStr}...`);
 
     const response = await axios.get('https://www.sec.gov/cgi-bin/browse-edgar', {
       params: {
         action: 'getcompany',
-        search_text: keyword,
+        q: keyword,
+        startdt: startDateStr,
+        enddt: endDateStr,
         owner: 'exclude',
-        after: dateFrom,
         count: 100,
         output: 'json'
       },
       headers: {
-        'User-Agent': 'Mozilla/5.0 (Death-Spiral-Tracker/1.0)',
-        'Accept': 'application/json'
+        'User-Agent': 'Mozilla/5.0 (Death-Spiral-Tracker/1.0)'
       },
       timeout: 30000
     });
