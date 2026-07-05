@@ -14,12 +14,16 @@ export async function searchEdgar(keyword: string, daysBack: number = 1): Promis
         after: dateFrom,
         count: 100,
         output: 'json'
-      }
+      },
+      headers: {
+        'User-Agent': 'Mozilla/5.0 (compatible; Death-Spiral-Tracker/1.0)'
+      },
+      timeout: 30000
     });
 
     return response.data.hits?.hits || [];
   } catch (error) {
-    console.error('EDGAR search error:', error);
+    console.error(`EDGAR search error for "${keyword}":`, error);
     return [];
   }
 }
