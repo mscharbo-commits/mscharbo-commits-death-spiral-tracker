@@ -1,6 +1,6 @@
 import axios from 'axios';
 
-export async function searchEdgar(keyword: string, daysBack: number = 1): Promise<any[]> {
+export async function searchEdgar(formType: string, daysBack: number = 1): Promise<any[]> {
   try {
     const date = new Date();
     date.setDate(date.getDate() - daysBack);
@@ -9,9 +9,9 @@ export async function searchEdgar(keyword: string, daysBack: number = 1): Promis
     const response = await axios.get('https://www.sec.gov/cgi-bin/browse-edgar', {
       params: {
         action: 'getcompany',
-        search_text: keyword,
+        type: formType,
+        dateb: dateFrom,
         owner: 'exclude',
-        after: dateFrom,
         count: 100,
         output: 'json'
       },
@@ -23,7 +23,7 @@ export async function searchEdgar(keyword: string, daysBack: number = 1): Promis
 
     return response.data.hits?.hits || [];
   } catch (error) {
-    console.error(`EDGAR search error for "${keyword}":`, error);
+    console.error(`EDGAR search error for form ${formType}:`, error);
     return [];
   }
 }
