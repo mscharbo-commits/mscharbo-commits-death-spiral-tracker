@@ -23,6 +23,7 @@ const KEYWORDS = [
   'lookback period',
   'mfn clause',
   'warrant coverage',
+  'registration rights',
 ];
 
 async function getFilingUrl(cik: string, accessionNumber: string): Promise<string> {
@@ -39,17 +40,18 @@ async function getFilingText(filingUrl: string): Promise<string | null> {
   }
 }
 
-export async function runDailyEdgarScan() {
+export async function runDailyEdgarScan(initialScan: boolean = false) {
   const supabase = createClient();
   let totalFound = 0;
   let totalProcessed = 0;
-
-  console.log(`[${new Date().toISOString()}] Starting daily EDGAR scan...`);
+  
+  const daysBack = initialScan ? 1095 : 1;
+  console.log(`[${new Date().toISOString()}] Starting EDGAR scan (searching back ${daysBack} days)...`);
 
   for (const keyword of KEYWORDS) {
     console.log(`Searching for: "${keyword}"`);
     try {
-      const results = await searchEdgar(keyword);
+      const results = await searchEdgar(keyword, daysBack);
       console.log(`Found ${results.length} results for "${keyword}"`);
 
       for (const result of results) {
@@ -98,6 +100,7 @@ export async function runDailyEdgarScan() {
         console.log(`✓ FOUND: ${result.conm} - ${terms.dealName}`);
         console.log(`  Investors: ${terms.noteHolders.map((i: any) => i.name).join(', ')}`);
         console.log(`  Total Principal: $${terms.principal}`);
+        console.log(`  Shares Registered: ${terms.sharesRegistered ? 'YES' : 'NO'}`);
 
         const noteResult = await supabase
           .from('death_spiral_notes')
@@ -148,5 +151,6 @@ export async function runDailyEdgarScan() {
 }
 
 if (require.main === module) {
-  runDailyEdgarScan().catch(console.error);
+  const initialScan = process.argv[2] === 'initial';
+  runDailyEdgarScan(initialScan).catch(console.error);
 }

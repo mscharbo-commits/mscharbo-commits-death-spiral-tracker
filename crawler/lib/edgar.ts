@@ -1,10 +1,10 @@
 import axios from 'axios';
 
-export async function searchEdgar(keyword: string): Promise<any[]> {
+export async function searchEdgar(keyword: string, daysBack: number = 1): Promise<any[]> {
   try {
-    const yesterday = new Date();
-    yesterday.setDate(yesterday.getDate() - 1);
-    const dateFrom = yesterday.toISOString().split('T')[0];
+    const date = new Date();
+    date.setDate(date.getDate() - daysBack);
+    const dateFrom = date.toISOString().split('T')[0];
 
     const response = await axios.get('https://www.sec.gov/cgi-bin/browse-edgar', {
       params: {
