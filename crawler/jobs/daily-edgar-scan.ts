@@ -1,20 +1,9 @@
 import { getCompanyFilings } from '../lib/finnhub';
-import { extractSignals, extractToxicConvertible } from '../lib/signals';
+import { extractToxicConvertible } from '../lib/signals';
 import { createClient } from '../lib/supabase';
 import axios from 'axios';
 
-// Tickers ChatGPT identified with known toxic converts
 const TICKERS = ['ABVC', 'ONMD', 'RCAT', 'SOAR', 'HUBC', 'MULN', 'FFIE', 'NVOS', 'GFAI', 'CYN'];
-
-// Exact phrases from SEC filings
-const TOXIC_PHRASES = [
-  'no minimum conversion price',
-  'variable conversion price',
-  'lowest trading days',
-  'floating-price financing',
-  'multiple restructuring',
-  'dilutive convertibles'
-];
 
 async function getFilingText(url: string): Promise<string | null> {
   try {
@@ -25,18 +14,17 @@ async function getFilingText(url: string): Promise<string | null> {
   }
 }
 
-function hasToxicPhrase(text: string): boolean {
-  const lowerText = text.toLowerCase();
-  return TOXIC_PHRASES.some(phrase => lowerText.includes(phrase));
+function hasConvertible(text: string): boolean {
+  return text.toLowerCase().includes('convertible');
 }
 
 export async function runDailyEdgarScan(initialScan: boolean = false) {
   const supabase = createClient();
   let totalFound = 0;
-  let toxicMentions = 0;
-  let totalToxic = 0;
+  let convertibleMentions = 0;
+  let totalHighRisk = 0;
   
-  console.log(`\n[${new Date().toISOString()}] 🚀 SCREENING KNOWN TOXIC TICKERS\n`);
+  console.log(`\n[${new Date().toISOString()}] 🚀 SCREENING CONVERTIBLE SECURITIES\n`);
 
   for (const ticker of TICKERS) {
     console.log(`📊 ${ticker}`);
@@ -51,13 +39,13 @@ export async function runDailyEdgarScan(initialScan: boolean = false) {
         const filingText = await getFilingText(filingUrl);
         if (!filingText) continue;
 
-        // Stage 1: Filter for toxic phrases
-        if (!hasToxicPhrase(filingText)) continue;
+        // STAGE 1: Just check if "convertible" appears
+        if (!hasConvertible(filingText)) continue;
 
-        toxicMentions++;
-        console.log(`  🔍 Found toxic phrase in ${filing.form}`);
+        convertibleMentions++;
+        console.log(`  🔍 Convertible mention found`);
 
-        // Get or create company
+        // STAGE 2: Claude analyzes for risk
         let company: any = null;
         const existingCompany = await supabase.from('death_spiral_companies').select('id').eq('name', ticker).single();
         
@@ -69,11 +57,10 @@ export async function runDailyEdgarScan(initialScan: boolean = false) {
         }
         if (!company) continue;
 
-        // Stage 2: Deep analysis with Claude
         const convertible = await extractToxicConvertible(filingText);
         if (convertible) {
-          totalToxic++;
-          console.log(`  ⚠️  TOXIC: ${convertible.dealName} (${convertible.toxicityScore}/10)`);
+          totalHighRisk++;
+          console.log(`  ⚠️  HIGH-RISK: ${convertible.dealName} (${convertible.toxicityScore}/10)`);
           
           const noteResult = await supabase.from('death_spiral_notes').insert([{
             company_id: company.id,
@@ -107,8 +94,8 @@ export async function runDailyEdgarScan(initialScan: boolean = false) {
 
   console.log(`\n[${new Date().toISOString()}] ✅ COMPLETE`);
   console.log(`📊 Filings scanned: ${totalFound}`);
-  console.log(`🔍 Toxic phrases found: ${toxicMentions}`);
-  console.log(`⚠️  TOXIC CONVERTIBLES: ${totalToxic}\n`);
+  console.log(`🔍 Contains "convertible": ${convertibleMentions}`);
+  console.log(`⚠️  HIGH-RISK SECURITIES: ${totalHighRisk}\n`);
 }
 
 if (require.main === module) {
