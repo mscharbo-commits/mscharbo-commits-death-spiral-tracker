@@ -1,13 +1,13 @@
-import { getCompanyFilings } from '../lib/polygon';
+import { getCompanyFilings } from '../lib/finnhub';
 import { extractSignals, extractToxicConvertible } from '../lib/signals';
 import { createClient } from '../lib/supabase';
 import axios from 'axios';
 
-// Use YOUR PulseStock tickers that are already filtered
 const TICKERS = [
   'NVDA', 'TSLA', 'MSFT', 'AAPL', 'AMZN',
   'GOOGL', 'META', 'NFLX', 'AMD', 'INTC',
-  'PLTR', 'UPST', 'COIN', 'HOOD', 'ROKU'
+  'PLTR', 'UPST', 'COIN', 'HOOD', 'SQ',
+  'PYPL', 'ABNB', 'UBER', 'ZM', 'ARKK'
 ];
 
 async function getFilingText(url: string): Promise<string | null> {
@@ -25,7 +25,7 @@ export async function runDailyEdgarScan(initialScan: boolean = false) {
   let totalSignals = 0;
   let totalToxic = 0;
   
-  console.log(`\n[${new Date().toISOString()}] 🚀 SCANNING POLYGON FOR SIGNALS\n`);
+  console.log(`\n[${new Date().toISOString()}] 🚀 FINNHUB FILING SCAN\n`);
 
   for (const ticker of TICKERS) {
     console.log(`📊 ${ticker}`);
@@ -33,12 +33,12 @@ export async function runDailyEdgarScan(initialScan: boolean = false) {
       const filings = await getCompanyFilings(ticker);
       
       for (const filing of filings) {
+        // Finnhub returns: { symbol, cik, accessionNumber, filingDate, reportDate, form, ... }
+        if (!filing.filingUrl && !filing.url) continue;
+        
         totalFound++;
 
-        // Polygon gives us URLs to filing text
-        const filingUrl = filing.filing_url || filing.url || '';
-        if (!filingUrl) continue;
-
+        const filingUrl = filing.filingUrl || filing.url || '';
         const filingText = await getFilingText(filingUrl);
         if (!filingText) continue;
 
@@ -49,7 +49,7 @@ export async function runDailyEdgarScan(initialScan: boolean = false) {
         if (existingCompany.data) {
           company = existingCompany.data;
         } else {
-          const newCompany = await supabase.from('death_spiral_companies').insert([{ name: ticker, cik: '' }]).select('id').single();
+          const newCompany = await supabase.from('death_spiral_companies').insert([{ name: ticker, cik: filing.cik || '' }]).select('id').single();
           if (newCompany.data) company = newCompany.data;
         }
         if (!company) continue;
@@ -58,7 +58,7 @@ export async function runDailyEdgarScan(initialScan: boolean = false) {
         const signals = await extractSignals(filingText, ticker);
         if (signals.length > 0) {
           totalSignals += signals.length;
-          console.log(`  📈 ${signals.length} signals`);
+          console.log(`  📈 ${filing.form}: ${signals.length} signals`);
           
           for (const signal of signals) {
             await supabase.from('investment_signals').insert([{
@@ -68,7 +68,7 @@ export async function runDailyEdgarScan(initialScan: boolean = false) {
               evidence: signal.evidence,
               sentiment: signal.sentiment,
               filing_url: filingUrl,
-              filing_date: new Date().toISOString().split('T')[0],
+              filing_date: filing.filingDate || new Date().toISOString().split('T')[0],
             }]);
           }
         }
@@ -77,7 +77,7 @@ export async function runDailyEdgarScan(initialScan: boolean = false) {
         const convertible = await extractToxicConvertible(filingText);
         if (convertible) {
           totalToxic++;
-          console.log(`  ⚠️  ${convertible.dealName}`);
+          console.log(`  ⚠️  TOXIC: ${convertible.dealName} (${convertible.toxicityScore}/10)`);
           
           const noteResult = await supabase.from('death_spiral_notes').insert([{
             company_id: company.id,
@@ -88,7 +88,7 @@ export async function runDailyEdgarScan(initialScan: boolean = false) {
             green_flags: convertible.greenFlags,
             is_toxic: convertible.toxicityScore >= 6,
             filing_url: filingUrl,
-            filing_date: new Date().toISOString().split('T')[0],
+            filing_date: filing.filingDate || new Date().toISOString().split('T')[0],
           }]).select('id').single();
 
           if (noteResult.data) {
@@ -103,16 +103,16 @@ export async function runDailyEdgarScan(initialScan: boolean = false) {
         }
       }
 
-      await new Promise((resolve) => setTimeout(resolve, 1000));
+      await new Promise((resolve) => setTimeout(resolve, 500));
     } catch (error) {
-      console.error(`Error:`, error);
+      console.error(`Error for ${ticker}:`, error);
     }
   }
 
   console.log(`\n[${new Date().toISOString()}] ✅ COMPLETE`);
-  console.log(`📈 Filings: ${totalFound}`);
-  console.log(`📊 Signals: ${totalSignals}`);
-  console.log(`⚠️  Toxic: ${totalToxic}\n`);
+  console.log(`📈 Filings analyzed: ${totalFound}`);
+  console.log(`📊 Investment signals: ${totalSignals}`);
+  console.log(`⚠️  Toxic convertibles: ${totalToxic}\n`);
 }
 
 if (require.main === module) {
