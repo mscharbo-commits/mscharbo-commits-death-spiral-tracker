@@ -1,37 +1,49 @@
 import axios from 'axios';
-import xml2js from 'xml2js';
+import * as cheerio from 'cheerio';
 
-const parser = new xml2js.Parser();
-
-export async function getFeedingsFromRSS(daysBack: number = 1): Promise<any[]> {
+export async function scrapeEdgarSearch(keyword: string): Promise<any[]> {
   try {
-    // SEC publishes daily RSS feeds of recent filings
-    const feeds = [
-      'https://www.sec.gov/cgi-bin/browse-edgar?action=getcompany&type=10-K&dateb=&owner=exclude&count=100&output=rss',
-      'https://www.sec.gov/cgi-bin/browse-edgar?action=getcompany&type=10-Q&dateb=&owner=exclude&count=100&output=rss',
-      'https://www.sec.gov/cgi-bin/browse-edgar?action=getcompany&type=8-K&dateb=&owner=exclude&count=100&output=rss',
-      'https://www.sec.gov/cgi-bin/browse-edgar?action=getcompany&type=S-1&dateb=&owner=exclude&count=100&output=rss',
-    ];
+    console.log(`  Scraping SEC EDGAR for "${keyword}"...`);
 
-    let allFilings: any[] = [];
+    // Hit the actual SEC EDGAR search page
+    const response = await axios.get('https://www.sec.gov/edgar/search/', {
+      params: {
+        q: keyword,
+        count: 100
+      },
+      headers: {
+        'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36'
+      },
+      timeout: 15000
+    });
 
-    for (const feedUrl of feeds) {
-      console.log(`  Fetching ${feedUrl.split('type=')[1]?.split('&')[0]}...`);
-      
-      const response = await axios.get(feedUrl, {
-        headers: { 'User-Agent': 'InvestmentSignalEngine/1.0' },
-        timeout: 10000
-      });
+    const $ = cheerio.load(response.data);
+    const filings: any[] = [];
 
-      const result = await parser.parseStringPromise(response.data);
-      const items = result.rss?.channel?.[0]?.item || [];
+    // Parse the search results table
+    $('table tbody tr').each((i, row) => {
+      const cells = $(row).find('td');
+      if (cells.length < 4) return;
 
-      allFilings.push(...items);
-    }
+      const companyName = $(cells[0]).text().trim();
+      const formType = $(cells[1]).text().trim();
+      const filedDate = $(cells[2]).text().trim();
+      const link = $(cells[0]).find('a').attr('href');
 
-    return allFilings;
+      if (companyName && link) {
+        filings.push({
+          conm: companyName,
+          form: formType,
+          filedAt: filedDate,
+          link: link.startsWith('http') ? link : `https://www.sec.gov${link}`
+        });
+      }
+    });
+
+    console.log(`  ✓ Found ${filings.length} results`);
+    return filings;
   } catch (error) {
-    console.error('RSS fetch error:', error);
+    console.error(`Scrape error for "${keyword}":`, error);
     return [];
   }
 }

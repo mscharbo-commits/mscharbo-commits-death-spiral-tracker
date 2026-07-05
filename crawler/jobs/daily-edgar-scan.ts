@@ -1,13 +1,16 @@
-import { getFeedingsFromRSS } from '../lib/edgar';
+import { scrapeEdgarSearch } from '../lib/edgar';
 import { extractSignals, extractToxicConvertible } from '../lib/signals';
 import { createClient } from '../lib/supabase';
 import axios from 'axios';
 
-async function extractFilingUrl(description: string): Promise<string | null> {
-  // RSS entries have URLs in description
-  const match = description.match(/href="([^"]+)"/);
-  return match ? match[1] : null;
-}
+const KEYWORDS = [
+  'convertible note',
+  'convertible loan',
+  'insider buying',
+  'share repurchase',
+  'going concern',
+  'material weakness',
+];
 
 async function getFilingText(filingUrl: string): Promise<string | null> {
   try {
@@ -24,101 +27,90 @@ export async function runDailyEdgarScan(initialScan: boolean = false) {
   let totalSignals = 0;
   let totalToxic = 0;
   
-  console.log(`\n[${new Date().toISOString()}] 🚀 INVESTMENT SIGNAL SCAN (RSS FEEDS)\n`);
+  console.log(`\n[${new Date().toISOString()}] 🚀 SCRAPING SEC EDGAR\n`);
 
-  const filings = await getFeedingsFromRSS();
-  console.log(`Found ${filings.length} recent filings from SEC RSS\n`);
+  for (const keyword of KEYWORDS) {
+    console.log(`🔍 "${keyword}"`);
+    try {
+      const filings = await scrapeEdgarSearch(keyword);
 
-  for (const filing of filings) {
-    const title = filing.title?.[0] || '';
-    const description = filing.description?.[0] || '';
-    
-    // Extract company and CIK from title
-    const titleMatch = title.match(/(.+?) \((.+?)\) (10-K|10-Q|8-K|S-1)/);
-    if (!titleMatch) continue;
-    
-    const companyName = titleMatch[1];
-    const cik = titleMatch[2];
-    const formType = titleMatch[3];
+      for (const filing of filings) {
+        totalFound++;
 
-    totalFound++;
+        const filingText = await getFilingText(filing.link);
+        if (!filingText) continue;
 
-    const filingUrl = await extractFilingUrl(description);
-    if (!filingUrl) continue;
+        // Get or create company
+        let company: any = null;
+        const existingCompany = await supabase.from('death_spiral_companies').select('id').eq('name', filing.conm).single();
+        
+        if (existingCompany.data) {
+          company = existingCompany.data;
+        } else {
+          const newCompany = await supabase.from('death_spiral_companies').insert([{ name: filing.conm, cik: '' }]).select('id').single();
+          if (newCompany.data) company = newCompany.data;
+        }
+        if (!company) continue;
 
-    const filingText = await getFilingText(filingUrl);
-    if (!filingText) {
-      console.log(`  ✗ ${companyName} - couldn't fetch`);
-      continue;
-    }
+        // Extract signals
+        const signals = await extractSignals(filingText, filing.conm);
+        if (signals.length > 0) {
+          totalSignals += signals.length;
+          console.log(`  📊 ${filing.conm} [${filing.form}]: ${signals.length} signals`);
+          
+          for (const signal of signals) {
+            await supabase.from('investment_signals').insert([{
+              company_id: company.id,
+              signal_type: signal.signalType,
+              strength: signal.strength,
+              evidence: signal.evidence,
+              sentiment: signal.sentiment,
+              filing_url: filing.link,
+              filing_date: filing.filedAt,
+            }]);
+          }
+        }
 
-    // Get or create company
-    let company: any = null;
-    const existingCompany = await supabase.from('death_spiral_companies').select('id').eq('cik', cik).single();
-    
-    if (existingCompany.data) {
-      company = existingCompany.data;
-    } else {
-      const newCompany = await supabase.from('death_spiral_companies').insert([{ name: companyName, cik }]).select('id').single();
-      if (newCompany.data) company = newCompany.data;
-    }
-    if (!company) continue;
+        // Check for toxic convertible
+        const convertible = await extractToxicConvertible(filingText);
+        if (convertible) {
+          totalToxic++;
+          console.log(`  ⚠️  TOXIC: ${convertible.dealName} (${convertible.toxicityScore}/10)`);
+          
+          const noteResult = await supabase.from('death_spiral_notes').insert([{
+            company_id: company.id,
+            deal_name: convertible.dealName,
+            total_principal: convertible.principal,
+            toxicity_score: convertible.toxicityScore,
+            red_flags: convertible.redFlags,
+            green_flags: convertible.greenFlags,
+            is_toxic: convertible.toxicityScore >= 6,
+            filing_url: filing.link,
+            filing_date: filing.filedAt,
+          }]).select('id').single();
 
-    // Extract signals
-    const signals = await extractSignals(filingText, companyName);
-    if (signals.length > 0) {
-      totalSignals += signals.length;
-      console.log(`  📊 ${companyName} [${formType}]: ${signals.length} signals`);
-      
-      for (const signal of signals) {
-        await supabase.from('investment_signals').insert([{
-          company_id: company.id,
-          signal_type: signal.signalType,
-          strength: signal.strength,
-          evidence: signal.evidence,
-          sentiment: signal.sentiment,
-          filing_url: filingUrl,
-          filing_date: new Date().toISOString().split('T')[0],
-        }]);
-      }
-    }
-
-    // Check for toxic convertible
-    const convertible = await extractToxicConvertible(filingText);
-    if (convertible) {
-      totalToxic++;
-      console.log(`  ⚠️  TOXIC: ${convertible.dealName} (${convertible.toxicityScore}/10)`);
-      
-      const noteResult = await supabase.from('death_spiral_notes').insert([{
-        company_id: company.id,
-        deal_name: convertible.dealName,
-        total_principal: convertible.principal,
-        toxicity_score: convertible.toxicityScore,
-        red_flags: convertible.redFlags,
-        green_flags: convertible.greenFlags,
-        is_toxic: convertible.toxicityScore >= 6,
-        filing_url: filingUrl,
-        filing_date: new Date().toISOString().split('T')[0],
-      }]).select('id').single();
-
-      if (noteResult.data) {
-        for (const investor of convertible.investors) {
-          await supabase.from('death_spiral_investors').insert([{
-            note_id: noteResult.data.id,
-            investor_name: investor.name,
-            principal: investor.principal || convertible.principal,
-          }]);
+          if (noteResult.data) {
+            for (const investor of convertible.investors) {
+              await supabase.from('death_spiral_investors').insert([{
+                note_id: noteResult.data.id,
+                investor_name: investor.name,
+                principal: investor.principal || convertible.principal,
+              }]);
+            }
+          }
         }
       }
-    }
 
-    await new Promise((resolve) => setTimeout(resolve, 1000));
+      await new Promise((resolve) => setTimeout(resolve, 2000));
+    } catch (error) {
+      console.error(`Error:`, error);
+    }
   }
 
-  console.log(`\n[${new Date().toISOString()}] ✅ SCAN COMPLETE`);
-  console.log(`📈 Filings analyzed: ${totalFound}`);
-  console.log(`📊 Investment signals: ${totalSignals}`);
-  console.log(`⚠️  Toxic convertibles: ${totalToxic}\n`);
+  console.log(`\n[${new Date().toISOString()}] ✅ COMPLETE`);
+  console.log(`📈 Filings: ${totalFound}`);
+  console.log(`📊 Signals: ${totalSignals}`);
+  console.log(`⚠️  Toxic: ${totalToxic}\n`);
 }
 
 if (require.main === module) {
