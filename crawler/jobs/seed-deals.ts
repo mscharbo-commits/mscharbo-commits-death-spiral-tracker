@@ -3,17 +3,20 @@ import { createClient } from '../lib/supabase';
 async function seedDeals() {
   const supabase = createClient();
   
-  console.log('\n🌱 Seeding test deals...\n');
+  console.log('\n🌱 Clearing old data...\n');
+  
+  await supabase.from('death_spiral_investors').delete().neq('id', '00000000-0000-0000-0000-000000000000');
+  await supabase.from('death_spiral_notes').delete().neq('id', '00000000-0000-0000-0000-000000000000');
+  await supabase.from('death_spiral_companies').delete().neq('id', '00000000-0000-0000-0000-000000000000');
+
+  console.log('✓ Cleared\n🌱 Seeding test deals...\n');
 
   const testDeals = [
     {
       companyName: 'Palantir Technologies',
-      dealName: 'Series A Convertible Note - 2010',
+      cik: '0001321655',
+      noteHolder: 'Founders Fund / In-Q-Tel',
       principal: 500000,
-      investors: [
-        { name: 'Founders Fund', principal: 250000 },
-        { name: 'In-Q-Tel', principal: 250000 }
-      ],
       toxicityScore: 7,
       redFlags: ['no floor', 'variable conversion rate', 'warrant coverage'],
       greenFlags: ['valuation cap'],
@@ -21,12 +24,9 @@ async function seedDeals() {
     },
     {
       companyName: 'Better.com',
-      dealName: 'Convertible Note Series B - 2021',
+      cik: '0001827788',
+      noteHolder: 'SoftBank Vision Fund / Goldman Sachs',
       principal: 2000000,
-      investors: [
-        { name: 'SoftBank Vision Fund', principal: 1200000 },
-        { name: 'Goldman Sachs', principal: 800000 }
-      ],
       toxicityScore: 8,
       redFlags: ['no floor', 'full ratchet anti-dilution', 'make-whole provision', 'warrant coverage 50%'],
       greenFlags: [],
@@ -34,14 +34,11 @@ async function seedDeals() {
     },
     {
       companyName: 'WeWork',
-      dealName: 'Convertible Debt - 2019',
+      cik: '0001616707',
+      noteHolder: 'SoftBank / JP Morgan',
       principal: 5000000,
-      investors: [
-        { name: 'Masayoshi Son (SoftBank)', principal: 3000000 },
-        { name: 'JP Morgan', principal: 2000000 }
-      ],
       toxicityScore: 9,
-      redFlags: ['no floor', 'variable conversion', 'multiple liquidation preference', 'control rights', 'mandatory redemption < 2 years'],
+      redFlags: ['no floor', 'variable conversion', 'multiple liquidation preference', 'control rights'],
       greenFlags: [],
       filingUrl: 'https://www.sec.gov/example3'
     }
@@ -49,46 +46,41 @@ async function seedDeals() {
 
   for (const deal of testDeals) {
     try {
-      // Insert company
-      let company: any = null;
-      const existing = await supabase.from('death_spiral_companies').select('id').eq('name', deal.companyName).single();
-      
-      if (existing.data) {
-        company = existing.data;
-      } else {
-        const newCompany = await supabase.from('death_spiral_companies').insert([{ name: deal.companyName, cik: '' }]).select('id').single();
-        company = newCompany.data;
+      const { data: company, error: companyError } = await supabase
+        .from('death_spiral_companies')
+        .insert([{ name: deal.companyName, cik: deal.cik }])
+        .select('id')
+        .single();
+
+      if (companyError) {
+        console.error(`❌ ${deal.companyName}:`, companyError.message);
+        continue;
       }
 
-      if (!company) continue;
+      const { data: note, error: noteError } = await supabase
+        .from('death_spiral_notes')
+        .insert([{
+          company_id: company.id,
+          note_holder: deal.noteHolder,
+          principal: deal.principal,
+          toxicity_score: deal.toxicityScore,
+          red_flags: deal.redFlags,
+          green_flags: deal.greenFlags,
+          is_toxic: deal.toxicityScore >= 6,
+          filing_url: deal.filingUrl,
+          filing_date: new Date().toISOString().split('T')[0],
+        }])
+        .select('id')
+        .single();
 
-      // Insert note
-      const noteResult = await supabase.from('death_spiral_notes').insert([{
-        company_id: company.id,
-        deal_name: deal.dealName,
-        total_principal: deal.principal,
-        toxicity_score: deal.toxicityScore,
-        red_flags: deal.redFlags,
-        green_flags: deal.greenFlags,
-        is_toxic: deal.toxicityScore >= 6,
-        filing_url: deal.filingUrl,
-        filing_date: new Date().toISOString().split('T')[0],
-      }]).select('id').single();
-
-      if (!noteResult.data) continue;
-
-      // Insert investors
-      for (const investor of deal.investors) {
-        await supabase.from('death_spiral_investors').insert([{
-          note_id: noteResult.data.id,
-          investor_name: investor.name,
-          principal: investor.principal || deal.principal,
-        }]);
+      if (noteError) {
+        console.error(`❌ ${deal.companyName}:`, noteError.message);
+        continue;
       }
 
-      console.log(`✅ ${deal.companyName} - ${deal.dealName}`);
+      console.log(`✅ ${deal.companyName}`);
     } catch (error) {
-      console.error(`❌ Failed to insert ${deal.companyName}:`, error);
+      console.error(`❌ ${deal.companyName}:`, error);
     }
   }
 
