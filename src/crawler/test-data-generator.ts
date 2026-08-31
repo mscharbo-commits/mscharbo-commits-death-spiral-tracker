@@ -59,4 +59,5 @@ function calculateToxicityScore(convertible: SyntheticConvertible): number {
   if (!convertible.warrantsIncluded) score -= 0.5;
   return Math.min(10, Math.max(1, Math.round(score * 10) / 10));
 }
-export { TOXIC_CONVERTIBLE_TEST_COMPANIES, TestCompany, SyntheticConvertible, generateSyntheticConvertibles, calculateToxicityScore };
+export { TOXIC_CONVERTIBLE_TEST_COMPANIES, generateSyntheticConvertibles, calculateToxicityScore };
+export type { TestCompany, SyntheticConvertible };
