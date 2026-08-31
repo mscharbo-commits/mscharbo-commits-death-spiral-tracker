@@ -9,9 +9,10 @@
     "lint": "next lint",
     "crawler:daily": "ts-node -P tsconfig.crawler.json crawler/jobs/daily-edgar-scan.ts",
     "crawler:8k": "ts-node -P tsconfig.crawler.json crawler/jobs/8k-conversion-scan.ts",
-    "crawler:both": "npm run crawler:daily && npm run crawler:8k",
+    "crawler:both": "npm run crawler:daily && npm run crawler:8k && npm run crawler:edgar",
     "test:edgar": "ts-node -P tsconfig.crawler.json crawler/jobs/test-edgar-filings.ts",
-    "seed": "ts-node -P tsconfig.crawler.json crawler/jobs/seed-deals.ts"
+    "seed": "ts-node -P tsconfig.crawler.json crawler/jobs/seed-deals.ts",
+    "crawler:edgar": "ts-node -P tsconfig.crawler.json crawler/jobs/edgar-job.ts"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.27.3",
@@ -25,10 +26,11 @@
     "xml2js": "^0.6.2"
   },
   "devDependencies": {
-    "@types/node": "^20.14.2",
+    "@types/node": "^20.19.43",
     "@types/react": "^18.3.3",
     "@types/xml2js": "^0.4.14",
+    "node-fetch": "^3.3.0",
     "ts-node": "^10.9.2",
-    "typescript": "^5.5.2"
+    "typescript": "^5.9.3"
   }
 }
