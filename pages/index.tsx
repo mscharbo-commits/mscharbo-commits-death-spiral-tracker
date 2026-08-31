@@ -1,10 +1,7 @@
+'use client';
+
 import { useEffect, useState } from 'react';
 import { createClient } from '@supabase/supabase-js';
-
-const supabase = createClient(
-  process.env.NEXT_PUBLIC_SUPABASE_URL || '',
-  process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || ''
-);
 
 interface DeathSpiralDeal {
   id: string;
@@ -32,6 +29,10 @@ export default function ConvertibleSecuritiesAnalyzer() {
 
   async function fetchDeals() {
     try {
+      const supabase = createClient(
+        process.env.NEXT_PUBLIC_SUPABASE_URL || '',
+        process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || ''
+      );
       const { data, error: fetchError } = await supabase
         .from('death_spiral_deals')
         .select('*')
@@ -113,7 +114,7 @@ export default function ConvertibleSecuritiesAnalyzer() {
           ) : error ? (
             <div className="p-8 text-center text-red-400">Error: {error}</div>
           ) : deals.length === 0 ? (
-            <div className="p-8 text-center text-gray-400">No death spiral deals found. Run the crawler!</div>
+            <div className="p-8 text-center text-gray-400">No death spiral deals found.</div>
           ) : (
             deals.map((deal, idx) => (
               <div key={deal.id} className={`grid grid-cols-12 gap-4 p-4 border-b border-slate-700/50 hover:bg-slate-700/20 transition ${idx % 2 === 0 ? 'bg-slate-800/20' : ''}`}>
@@ -145,11 +146,6 @@ export default function ConvertibleSecuritiesAnalyzer() {
             ))
           )}
         </div>
-      </div>
-
-      <div className="max-w-7xl mx-auto mt-8 text-gray-500 text-sm">
-        <p>🔴 CRITICAL: Floorless + deep discount + full ratchet = death spiral imminent</p>
-        <p>🟠 HIGH: Multiple red flags, significant dilution risk</p>
       </div>
     </div>
   );
